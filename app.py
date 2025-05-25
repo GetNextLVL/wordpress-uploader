@@ -10,7 +10,6 @@ class Base(DeclarativeBase):
 db = SQLAlchemy(model_class=Base)
 app = Flask(__name__)
 
-# Configuration from environment variables
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_change_this")
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///wordpress_uploader.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -18,6 +17,8 @@ app.config["GOOGLE_SHEETS_ID"] = os.environ.get("GOOGLE_SHEETS_ID")
 app.config["WP_API_URL"] = os.environ.get("WP_API_URL")
 app.config["WP_API_USER"] = os.environ.get("WP_API_USER")
 app.config["WP_API_KEY"] = os.environ.get("WP_API_KEY")
+app.config["GOOGLE_SHEET_NAME"] = os.environ.get("GOOGLE_SHEET_NAME")
+app.config["WP_SITE_URL"] = os.environ.get("WP_SITE_URL")
 
 db.init_app(app)
 
@@ -61,9 +62,9 @@ def process_rows():
         start_row = request.args.get('start', type=int)
         end_row = request.args.get('end', type=int)
         if not start_row or not end_row:
-            return jsonify({'success': False, 'error': 'Missing required parameters: start and end rows must be provided'}), 400
+            return jsonify({'success': False, 'error': 'Missing required parameters'}), 400
         if start_row > end_row:
-            return jsonify({'success': False, 'error': 'Invalid row range: start row must be less than or equal to end row'}), 400
+            return jsonify({'success': False, 'error': 'Invalid row range'}), 400
         run_specific_rows(start_row, end_row)
         return jsonify({'success': True, 'message': f'Processing rows {start_row} to {end_row}'})
     except Exception as e:
@@ -75,15 +76,6 @@ def process_specific_rows(start_row, end_row):
     try:
         run_specific_rows(start_row, end_row)
         return jsonify({'success': True, 'message': f'Processing rows {start_row} to {end_row}'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/process/rows26and27', methods=['POST'])
-def process_rows_26_and_27():
-    from utils.processor import run_specific_rows
-    try:
-        run_specific_rows(26, 27)
-        return jsonify({'success': True, 'message': 'Processing rows 26 and 27'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
