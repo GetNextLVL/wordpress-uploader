@@ -163,18 +163,17 @@ class ArticleProcessor:
             self.add_log('ERROR', f'Image process error: {str(e)}')
 
     def run_processor(self, row_filter=None):
-        self.add_log('INFO', 'Starting article processing')
-        self.process_sheets(row_filter)
-        self.process_images()
-        self.add_log('INFO', 'Process complete')
+        with app.app_context():
+            self.add_log('INFO', 'Starting article processing')
+            self.process_sheets(row_filter)
+            self.process_images()
+            self.add_log('INFO', 'Process complete')
 
 def run_article_processor(row_filter=None):
-    with app.app_context():
-        ArticleProcessor().run_processor(row_filter)
+    ArticleProcessor().run_processor(row_filter)
 
 def run_specific_rows(start_row, end_row):
-    with app.app_context():
-        ArticleProcessor().run_processor((start_row, end_row))
+    ArticleProcessor().run_processor((start_row, end_row))
 
 if __name__ == "__main__":
     run_article_processor()
