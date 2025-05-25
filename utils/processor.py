@@ -66,8 +66,9 @@ class ArticleProcessor:
 
             for row_idx, row in enumerate(rows[1:], start=2):
                 if row_filter and (row_idx < row_filter[0] or row_idx > row_filter[1]):
-                    self.add_log('INFO', f'Skipping row {row_idx} (outside filter)')
                     continue
+
+                self.add_log('INFO', f"🔄 Processing row {row_idx}...")
 
                 try:
                     row_data = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
@@ -77,10 +78,11 @@ class ArticleProcessor:
                     if not title:
                         self.add_log('WARNING', f'Row {row_idx}: Missing title')
                         continue
+                    self.add_log('DEBUG', f'Row {row_idx}: Title = {title}')
 
                     existing_article = Article.query.filter_by(title=title).first()
                     if existing_article:
-                        self.add_log('INFO', f'Row {row_idx}: Already exists')
+                        self.add_log('INFO', f'Row {row_idx}: Article already exists')
                         continue
 
                     doc_link = next((row_data[k] for k in ['Document Link', 'google_doc_link', 'קישור למאמר', 'לינק למסמך']
@@ -90,7 +92,12 @@ class ArticleProcessor:
                         match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', doc_link)
                         if match:
                             doc_id = match.group(1)
-                            content = self.google_api.get_doc_content(doc_id)
+                            try:
+                                content = self.google_api.get_doc_content(doc_id)
+                                self.add_log('DEBUG', f'Row {row_idx}: Fetched Google Doc content')
+                            except Exception as doc_err:
+                                self.add_log('ERROR', f'Row {row_idx}: Failed to fetch doc content – {str(doc_err)}')
+                                continue
 
                     date_str = next((row_data[k] for k in ['Scheduled Date', 'scheduled_date', 'תאריך פרסום', 'תאריך']
                                      if k in row_data and row_data[k]), None)
@@ -102,6 +109,7 @@ class ArticleProcessor:
                                 break
                             except ValueError:
                                 continue
+                    self.add_log('DEBUG', f'Row {row_idx}: Scheduled Date = {scheduled_date}')
 
                     category = next((row_data[k] for k in ['Category', 'category', 'קטגוריה']
                                      if k in row_data and row_data[k]), None)
@@ -119,6 +127,7 @@ class ArticleProcessor:
                     )
                     db.session.add(article)
                     db.session.commit()
+                    self.add_log('INFO', f'✅ Row {row_idx}: Article saved to DB – ID {article.id}')
 
                     self.google_api.update_cell(self.spreadsheet_id, self.sheet_name, f'C{row_idx}', 'מוכן')
 
@@ -135,7 +144,9 @@ class ArticleProcessor:
                 if article.image_link and not article.featured_media_id:
                     try:
                         direct_link = convert_drive_link_to_direct(article.image_link)
-                        response = requests.get(direct_link)
+                        self.add_log('DEBUG', f'Downloading image from: {direct_link}')
+
+                        response = requests.get(direct_link, timeout=10)
                         if response.status_code != 200:
                             self.add_log('ERROR', f'Failed to download image: {direct_link} | Status: {response.status_code} | Response: {response.text}')
                             continue
@@ -148,7 +159,7 @@ class ArticleProcessor:
                         if media_id:
                             article.featured_media_id = media_id
                             db.session.commit()
-                            self.add_log('INFO', f'Uploaded image for article: "{article.title}"')
+                            self.add_log('INFO', f'🖼 Uploaded image for article: "{article.title}"')
 
                             if article.wp_post_id:
                                 post_url = f"{self.site_url}/?p={article.wp_post_id}"
@@ -164,10 +175,10 @@ class ArticleProcessor:
 
     def run_processor(self, row_filter=None):
         with app.app_context():
-            self.add_log('INFO', 'Starting article processing')
+            self.add_log('INFO', '🚀 Starting article processing')
             self.process_sheets(row_filter)
             self.process_images()
-            self.add_log('INFO', 'Process complete')
+            self.add_log('INFO', '✅ Processing complete')
 
 def run_article_processor(row_filter=None):
     ArticleProcessor().run_processor(row_filter)
