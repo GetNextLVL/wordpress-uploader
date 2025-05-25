@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i data-feather="activity"></i> System Status
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="status-card" id="pending-posts">
+                            <h6>Pending Posts</h6>
+                            <span class="h3">0</span>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="status-card" id="published-posts">
+                            <h6>Published Today</h6>
+                            <span class="h3">0</span>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="status-card" id="error-count">
+                            <h6>Recent Errors</h6>
+                            <span class="h3">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-12 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i data-feather="tool"></i> Manual Actions
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card mb-0">
+                            <div class="card-body">
+                                <h6 class="card-title">Process Specific Rows</h6>
+                                <p class="mb-2">Manually process only rows 26 and 27 from Google Sheets</p>
+                                <button id="process-rows-26-27" class="btn btn-primary">
+                                    <i data-feather="play"></i> Process Rows 26-27
+                                </button>
+                                <div id="process-result" class="mt-2 d-none alert">
+                                    <!-- Result message will appear here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card mb-0">
+                            <div class="card-body">
+                                <h6 class="card-title">Process Custom Rows</h6>
+                                <form id="custom-row-form" class="d-flex align-items-center">
+                                    <div class="form-group mr-2 mb-0">
+                                        <input type="number" class="form-control" id="start-row" placeholder="Start Row" min="1" required>
+                                    </div>
+                                    <div class="form-group mr-2 mb-0">
+                                        <input type="number" class="form-control" id="end-row" placeholder="End Row" min="1" required>
+                                    </div>
+                                    <button type="submit" class="btn btn-secondary">
+                                        <i data-feather="play-circle"></i> Process
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i data-feather="list"></i> Recent Activity
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover" id="activity-log">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Action</th>
+                                <th>Status</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
