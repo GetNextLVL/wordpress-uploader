@@ -92,12 +92,8 @@ class ArticleProcessor:
                         match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', doc_link)
                         if match:
                             doc_id = match.group(1)
-                            try:
-                                content = self.google_api.get_doc_content(doc_id)
-                                self.add_log('DEBUG', f'Row {row_idx}: Fetched Google Doc content')
-                            except Exception as doc_err:
-                                self.add_log('ERROR', f'Row {row_idx}: Failed to fetch doc content – {str(doc_err)}')
-                                continue
+                            content = self.google_api.get_doc_content(doc_id)
+                            self.add_log('DEBUG', f'Row {row_idx}: Fetched Google Doc content')
 
                     date_str = next((row_data[k] for k in ['Scheduled Date', 'scheduled_date', 'תאריך פרסום', 'תאריך']
                                      if k in row_data and row_data[k]), None)
@@ -115,6 +111,8 @@ class ArticleProcessor:
                                      if k in row_data and row_data[k]), None)
                     image_link = next((row_data[k] for k in ['Image Link', 'image_link', 'קישור לתמונה', 'תמונה']
                                        if k in row_data and row_data[k]), None)
+                    image_name = next((row_data[k] for k in ['Image Name', 'image_name', 'שם תמונה']
+                                       if k in row_data and row_data[k]), 'image.jpg')
 
                     article = Article(
                         title=title,
@@ -129,7 +127,38 @@ class ArticleProcessor:
                     db.session.commit()
                     self.add_log('INFO', f'✅ Row {row_idx}: Article saved to DB – ID {article.id}')
 
-                    self.google_api.update_cell(self.spreadsheet_id, self.sheet_name, f'C{row_idx}', 'מוכן')
+                    media_id = None
+                    if image_link:
+                        direct_link = convert_drive_link_to_direct(image_link)
+                        self.add_log('DEBUG', f'Downloading image from: {direct_link}')
+                        response = requests.get(direct_link, timeout=10)
+                        if response.status_code == 200:
+                            media_id = self.wp_api.upload_media(BytesIO(response.content).read(), image_name)
+                            if media_id:
+                                article.featured_media_id = media_id
+                                db.session.commit()
+                                self.add_log('INFO', f'🖼 Uploaded image for article: "{title}"')
+                        else:
+                            self.add_log('ERROR', f'Image failed to download: {direct_link} | {response.status_code}')
+
+                    wp_post = self.wp_api.create_post(
+                        title=title,
+                        content=content,
+                        status='publish',
+                        category_id=None,
+                        featured_media_id=media_id,
+                        date=scheduled_date
+                    )
+
+                    if wp_post:
+                        article.wordpress_id = wp_post.get('id')
+                        db.session.commit()
+                        post_url = f"{self.site_url}/?p={article.wordpress_id}"
+                        self.google_api.update_cell(self.spreadsheet_id, self.sheet_name, f'H{row_idx}', post_url)
+                        self.google_api.update_cell(self.spreadsheet_id, self.sheet_name, f'C{row_idx}', 'מוכן')
+                        self.add_log('INFO', f'✅ Post created and published: {post_url}')
+                    else:
+                        self.add_log('ERROR', f'❌ Failed to create WordPress post for row {row_idx}')
 
                 except Exception as err:
                     self.add_log('ERROR', f'Row {row_idx} error: {str(err)}')
@@ -137,48 +166,10 @@ class ArticleProcessor:
         except Exception as e:
             self.add_log('ERROR', f'Sheet processing error: {str(e)}')
 
-    def process_images(self):
-        try:
-            articles = Article.query.filter_by(status='publish').all()
-            for article in articles:
-                if article.image_link and not article.featured_media_id:
-                    try:
-                        direct_link = convert_drive_link_to_direct(article.image_link)
-                        self.add_log('DEBUG', f'Downloading image from: {direct_link}')
-
-                        response = requests.get(direct_link, timeout=10)
-                        if response.status_code != 200:
-                            self.add_log('ERROR', f'Failed to download image: {direct_link} | Status: {response.status_code} | Response: {response.text}')
-                            continue
-
-                        filename = direct_link.split('/')[-1].split('?')[0]
-                        if '.' not in filename:
-                            filename += '.jpg'
-
-                        media_id = self.wp_api.upload_media(BytesIO(response.content).read(), filename)
-                        if media_id:
-                            article.featured_media_id = media_id
-                            db.session.commit()
-                            self.add_log('INFO', f'🖼 Uploaded image for article: "{article.title}"')
-
-                            if article.wordpress_id:
-                                post_url = f"{self.site_url}/?p={article.wordpress_id}"
-                                row_number = Article.query.filter(Article.title == article.title).first().id + 1
-                                sheet_name = self.sheet_name or app.config.get('GOOGLE_SHEET_NAME') or 'Sheet1'
-                                self.google_api.update_cell(self.spreadsheet_id, sheet_name, f'H{row_number}', post_url)
-                        else:
-                            self.add_log('ERROR', f'Upload failed: {article.title} | Image: {direct_link}')
-
-                    except Exception as img_error:
-                        self.add_log('ERROR', f'Error processing image for "{article.title}": {str(img_error)} | Link: {article.image_link}')
-        except Exception as e:
-            self.add_log('ERROR', f'Image process error: {str(e)}')
-
     def run_processor(self, row_filter=None):
         with app.app_context():
             self.add_log('INFO', '🚀 Starting article processing')
             self.process_sheets(row_filter)
-            self.process_images()
             self.add_log('INFO', '✅ Processing complete')
 
 def run_article_processor(row_filter=None):
