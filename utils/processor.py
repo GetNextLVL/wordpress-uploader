@@ -161,8 +161,8 @@ class ArticleProcessor:
                             db.session.commit()
                             self.add_log('INFO', f'🖼 Uploaded image for article: "{article.title}"')
 
-                            if article.wp_post_id:
-                                post_url = f"{self.site_url}/?p={article.wp_post_id}"
+                            if article.wordpress_id:
+                                post_url = f"{self.site_url}/?p={article.wordpress_id}"
                                 row_number = Article.query.filter(Article.title == article.title).first().id + 1
                                 sheet_name = self.sheet_name or app.config.get('GOOGLE_SHEET_NAME') or 'Sheet1'
                                 self.google_api.update_cell(self.spreadsheet_id, sheet_name, f'H{row_number}', post_url)
