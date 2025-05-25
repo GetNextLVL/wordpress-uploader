@@ -13,7 +13,7 @@ class WordPressAPI:
         }
 
     def create_post(self, title, content, status='draft', category_id=None, featured_media_id=None, date=None):
-        endpoint = f"{self.api_url}/wp-json/wp/v2/posts"
+        endpoint = f"{self.api_url}/posts"
         data = {
             'title': title,
             'content': content,
@@ -36,7 +36,7 @@ class WordPressAPI:
             return None
 
     def upload_media(self, image_data, filename):
-        endpoint = f"{self.api_url}/wp-json/wp/v2/media"
+        endpoint = f"{self.api_url}/media"
         headers = {
             'Authorization': f'Basic {self.auth}',
             'Content-Disposition': f'attachment; filename={filename}'
