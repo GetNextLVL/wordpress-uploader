@@ -51,7 +51,8 @@ class WordPressAPI:
         endpoint = f"{self.api_url}/media"
         headers = {
             'Authorization': f'Basic {self.auth}',
-            'Content-Disposition': f'attachment; filename={filename}'
+            'Content-Disposition': f'attachment; filename={filename}',
+            'Content-Type': 'image/jpeg'
         }
 
         try:
