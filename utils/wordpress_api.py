@@ -28,14 +28,26 @@ class WordPressAPI:
             data['date'] = date.isoformat()
 
         try:
-            response = requests.post(endpoint, json=data, headers=self.headers)
+            logging.debug(f"📤 Creating post: {title} | Status: {status}")
+            response = requests.post(endpoint, json=data, headers=self.headers, timeout=10)
             response.raise_for_status()
-            return response.json()
+            post = response.json()
+            logging.info(f"✅ Post created successfully: ID {post.get('id')} | Link: {post.get('link')}")
+            return post
         except requests.exceptions.RequestException as e:
-            logging.error(f"Error creating WordPress post: {str(e)}")
+            logging.error(f"❌ Error creating WordPress post: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                logging.error(f"Response content: {e.response.text}")
             return None
 
     def upload_media(self, image_data, filename):
+        if not image_data:
+            logging.error("❌ No image data provided for upload.")
+            return None
+        if not filename:
+            logging.error("❌ No filename provided for upload.")
+            return None
+
         endpoint = f"{self.api_url}/media"
         headers = {
             'Authorization': f'Basic {self.auth}',
@@ -43,9 +55,15 @@ class WordPressAPI:
         }
 
         try:
-            response = requests.post(endpoint, data=image_data, headers=headers)
+            logging.debug(f"🖼 Uploading media file: {filename}")
+            response = requests.post(endpoint, data=image_data, headers=headers, timeout=10)
             response.raise_for_status()
-            return response.json().get('id')
+            media = response.json()
+            media_id = media.get('id')
+            logging.info(f"✅ Media uploaded successfully: ID {media_id} | Link: {media.get('source_url')}")
+            return media_id
         except requests.exceptions.RequestException as e:
-            logging.error(f"Error uploading media: {str(e)}")
+            logging.error(f"❌ Error uploading media: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                logging.error(f"Response content: {e.response.text}")
             return None
