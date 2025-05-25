@@ -26,6 +26,8 @@ class ArticleProcessor:
             app.config['WP_API_KEY']
         )
         self.spreadsheet_id = app.config['GOOGLE_SHEETS_ID']
+        self.sheet_name = app.config['GOOGLE_SHEET_NAME']
+        self.site_url = app.config['WP_SITE_URL']
 
     def add_log(self, level, message):
         log = Log(level=level, message=message)
@@ -41,18 +43,19 @@ class ArticleProcessor:
 
     def process_sheets(self, row_filter=None):
         try:
-            sheet_metadata = self.google_api.sheets_service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
-            sheet_names = [sheet['properties']['title'] for sheet in sheet_metadata.get('sheets', [])]
+            sheet_metadata = self.google_api.sheets_service.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id).execute()
+            sheet_names = [s['properties']['title'] for s in sheet_metadata.get('sheets', [])]
             if not sheet_names:
                 self.add_log('ERROR', 'No sheets found.')
                 return
-            first_sheet_name = sheet_names[0]
+            first_sheet = sheet_names[0]
 
             if row_filter and len(row_filter) == 2:
                 start_row, end_row = row_filter
-                range_name = f'{first_sheet_name}!A1:H{end_row}'
+                range_name = f'{first_sheet}!A1:H{end_row}'
             else:
-                range_name = f'{first_sheet_name}!A1:H'
+                range_name = f'{first_sheet}!A1:H'
 
             rows = self.google_api.get_sheet_data(self.spreadsheet_id, range_name)
             if not rows:
@@ -69,8 +72,8 @@ class ArticleProcessor:
                 try:
                     row_data = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
 
-                    title = next((row_data[key] for key in ['Title', 'title', 'כותרת', 'כותרת מאמר', 'שם המאמר', 'נושא']
-                                  if key in row_data and row_data[key]), None)
+                    title = next((row_data[k] for k in ['Title', 'title', 'כותרת', 'כותרת מאמר', 'שם המאמר', 'נושא']
+                                  if k in row_data and row_data[k]), None)
                     if not title:
                         self.add_log('WARNING', f'Row {row_idx}: Missing title')
                         continue
@@ -80,9 +83,8 @@ class ArticleProcessor:
                         self.add_log('INFO', f'Row {row_idx}: Already exists')
                         continue
 
-                    doc_link = next((row_data[key] for key in ['Document Link', 'google_doc_link', 'קישור למאמר', 'לינק למסמך']
-                                     if key in row_data and row_data[key]), None)
-
+                    doc_link = next((row_data[k] for k in ['Document Link', 'google_doc_link', 'קישור למאמר', 'לינק למסמך']
+                                     if k in row_data and row_data[k]), None)
                     content = ''
                     if doc_link and 'docs.google.com' in doc_link:
                         match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', doc_link)
@@ -90,9 +92,8 @@ class ArticleProcessor:
                             doc_id = match.group(1)
                             content = self.google_api.get_doc_content(doc_id)
 
-                    date_str = next((row_data[key] for key in ['Scheduled Date', 'scheduled_date', 'תאריך פרסום', 'תאריך']
-                                     if key in row_data and row_data[key]), None)
-
+                    date_str = next((row_data[k] for k in ['Scheduled Date', 'scheduled_date', 'תאריך פרסום', 'תאריך']
+                                     if k in row_data and row_data[k]), None)
                     scheduled_date = None
                     if date_str:
                         for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y']:
@@ -102,11 +103,10 @@ class ArticleProcessor:
                             except ValueError:
                                 continue
 
-                    category = next((row_data[key] for key in ['Category', 'category', 'קטגוריה']
-                                     if key in row_data and row_data[key]), None)
-
-                    image_link = next((row_data[key] for key in ['Image Link', 'image_link', 'קישור לתמונה', 'תמונה']
-                                       if key in row_data and row_data[key]), None)
+                    category = next((row_data[k] for k in ['Category', 'category', 'קטגוריה']
+                                     if k in row_data and row_data[k]), None)
+                    image_link = next((row_data[k] for k in ['Image Link', 'image_link', 'קישור לתמונה', 'תמונה']
+                                       if k in row_data and row_data[k]), None)
 
                     article = Article(
                         title=title,
@@ -120,8 +120,7 @@ class ArticleProcessor:
                     db.session.add(article)
                     db.session.commit()
 
-                    # עדכון סטטוס ל"מוכן"
-                    self.google_api.update_cell(self.spreadsheet_id, first_sheet_name, f'C{row_idx}', 'מוכן')
+                    self.google_api.update_cell(self.spreadsheet_id, self.sheet_name, f'C{row_idx}', 'מוכן')
 
                 except Exception as err:
                     self.add_log('ERROR', f'Row {row_idx} error: {str(err)}')
@@ -137,39 +136,37 @@ class ArticleProcessor:
                     try:
                         direct_link = convert_drive_link_to_direct(article.image_link)
                         response = requests.get(direct_link)
-                        response.raise_for_status()
+                        if response.status_code != 200:
+                            self.add_log('ERROR', f'Failed to download image: {direct_link} | Status: {response.status_code} | Response: {response.text}')
+                            continue
 
                         filename = direct_link.split('/')[-1].split('?')[0]
                         if '.' not in filename:
                             filename += '.jpg'
 
-                        media_id = self.wp_api.upload_media(
-                            BytesIO(response.content).read(), filename
-                        )
-
+                        media_id = self.wp_api.upload_media(BytesIO(response.content).read(), filename)
                         if media_id:
                             article.featured_media_id = media_id
                             db.session.commit()
-                            self.add_log('INFO', f'Uploaded image: {article.title}')
+                            self.add_log('INFO', f'Uploaded image for article: "{article.title}"')
 
-                            # כתיבת קישור לפוסט בגיליון
-                            post_url = f"{app.config['WP_SITE_URL']}/?p={article.wp_post_id}"
-                            row_number = article.id + 1
-                            self.google_api.update_cell(self.spreadsheet_id, app.config['GOOGLE_SHEET_NAME'], f'H{row_number}', post_url)
-
+                            if article.wp_post_id:
+                                post_url = f"{self.site_url}/?p={article.wp_post_id}"
+                                row_number = article.id + 1
+                                self.google_api.update_cell(self.spreadsheet_id, self.sheet_name, f'H{row_number}', post_url)
                         else:
-                            self.add_log('ERROR', f'Upload failed: {article.title}')
+                            self.add_log('ERROR', f'Upload failed: {article.title} | Image: {direct_link}')
 
                     except Exception as img_error:
-                        self.add_log('ERROR', f'Image error "{article.title}": {str(img_error)}')
+                        self.add_log('ERROR', f'Error processing image for "{article.title}": {str(img_error)} | Link: {article.image_link}')
         except Exception as e:
             self.add_log('ERROR', f'Image process error: {str(e)}')
 
     def run_processor(self, row_filter=None):
-        self.add_log('INFO', '🟢 Starting process')
+        self.add_log('INFO', 'Starting article processing')
         self.process_sheets(row_filter)
         self.process_images()
-        self.add_log('INFO', '✅ Process complete')
+        self.add_log('INFO', 'Process complete')
 
 def run_article_processor(row_filter=None):
     with app.app_context():
