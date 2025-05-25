@@ -26,7 +26,7 @@ class ArticleProcessor:
             app.config['WP_API_KEY']
         )
         self.spreadsheet_id = app.config['GOOGLE_SHEETS_ID']
-        self.sheet_name = app.config['GOOGLE_SHEET_NAME']
+        self.sheet_name = app.config.get('GOOGLE_SHEET_NAME') or 'Sheet1'
         self.site_url = app.config['WP_SITE_URL']
 
     def add_log(self, level, message):
@@ -163,8 +163,9 @@ class ArticleProcessor:
 
                             if article.wp_post_id:
                                 post_url = f"{self.site_url}/?p={article.wp_post_id}"
-                                row_number = article.id + 1
-                                self.google_api.update_cell(self.spreadsheet_id, self.sheet_name, f'H{row_number}', post_url)
+                                row_number = Article.query.filter(Article.title == article.title).first().id + 1
+                                sheet_name = self.sheet_name or app.config.get('GOOGLE_SHEET_NAME') or 'Sheet1'
+                                self.google_api.update_cell(self.spreadsheet_id, sheet_name, f'H{row_number}', post_url)
                         else:
                             self.add_log('ERROR', f'Upload failed: {article.title} | Image: {direct_link}')
 
