@@ -1,4 +1,5 @@
 import os
+import logging
 from flask import Flask, render_template, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
@@ -10,14 +11,15 @@ class Base(DeclarativeBase):
 db = SQLAlchemy(model_class=Base)
 app = Flask(__name__)
 
+# Config
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_change_this")
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///wordpress_uploader.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["GOOGLE_SHEETS_ID"] = os.environ.get("GOOGLE_SHEETS_ID")
+app.config["GOOGLE_SHEET_NAME"] = os.environ.get("GOOGLE_SHEET_NAME")
 app.config["WP_API_URL"] = os.environ.get("WP_API_URL")
 app.config["WP_API_USER"] = os.environ.get("WP_API_USER")
 app.config["WP_API_KEY"] = os.environ.get("WP_API_KEY")
-app.config["GOOGLE_SHEET_NAME"] = os.environ.get("GOOGLE_SHEET_NAME")
 app.config["WP_SITE_URL"] = os.environ.get("WP_SITE_URL")
 
 db.init_app(app)
@@ -61,33 +63,46 @@ def process_rows():
     try:
         start_row = request.args.get('start', type=int)
         end_row = request.args.get('end', type=int)
-        if not start_row or not end_row:
+        logging.info(f"📥 /api/process/rows called with: start={start_row}, end={end_row}")
+
+        if start_row is None or end_row is None:
+            logging.warning("⚠️ Missing row parameters")
             return jsonify({'success': False, 'error': 'Missing required parameters'}), 400
         if start_row > end_row:
+            logging.warning("⚠️ Invalid row range")
             return jsonify({'success': False, 'error': 'Invalid row range'}), 400
+
         run_specific_rows(start_row, end_row)
+        logging.info(f"✅ Successfully triggered processing for rows {start_row}–{end_row}")
         return jsonify({'success': True, 'message': f'Processing rows {start_row} to {end_row}'})
     except Exception as e:
+        logging.error(f"❌ Error in process_rows: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/process/rows/<int:start_row>/<int:end_row>', methods=['POST'])
 def process_specific_rows(start_row, end_row):
     from utils.processor import run_specific_rows
     try:
+        logging.info(f"📥 /api/process/rows/{start_row}/{end_row} called")
         run_specific_rows(start_row, end_row)
+        logging.info(f"✅ Processing initiated for rows {start_row}–{end_row}")
         return jsonify({'success': True, 'message': f'Processing rows {start_row} to {end_row}'})
     except Exception as e:
+        logging.error(f"❌ Error in process_specific_rows: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.errorhandler(404)
 def not_found_error(error):
+    logging.warning("⚠️ 404 Not Found")
     return render_template('base.html', error="Page not found"), 404
 
 @app.errorhandler(500)
 def internal_error(error):
+    logging.error(f"❌ 500 Internal Error: {str(error)}")
     db.session.rollback()
     return render_template('base.html', error="Internal server error"), 500
 
+# Initialize DB
 with app.app_context():
     import models
     db.create_all()
