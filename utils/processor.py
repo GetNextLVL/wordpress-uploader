@@ -19,8 +19,6 @@ class ArticleProcessor:
         self.spreadsheet_id = app.config['GOOGLE_SHEETS_ID']
         
     def add_log(self, level, message):
-        """Add a log entry to the database"""
-        from models import Log
         log = Log(level=level, message=message)
         db.session.add(log)
         db.session.commit()
@@ -31,17 +29,9 @@ class ArticleProcessor:
             logging.ERROR,
             message
         )
-    
+
     def process_sheets(self, row_filter=None):
-        """
-        Process articles from Google Sheets
-        
-        Args:
-            row_filter (tuple, optional): A tuple of (start_row, end_row) to process only specific rows.
-                                         Row numbers are 1-indexed as in the spreadsheet UI.
-        """
         try:
-            # Get information about the spreadsheet to identify sheet names
             try:
                 self.add_log('INFO', f'Getting sheet information for spreadsheet: {self.spreadsheet_id}')
                 sheet_metadata = self.google_api.sheets_service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
@@ -50,78 +40,62 @@ class ArticleProcessor:
                 if not sheet_names:
                     self.add_log('ERROR', f'No sheets found in spreadsheet: {self.spreadsheet_id}')
                     return
-                    
+
                 self.add_log('INFO', f'Found sheets: {", ".join(sheet_names)}')
                 first_sheet_name = sheet_names[0]
             except Exception as e:
                 self.add_log('ERROR', f'Error getting sheet metadata: {str(e)}')
-                # Fallback to a default sheet name
                 first_sheet_name = 'Sheet1'
-            
-            # Define the range with the correct sheet name
-            # If row filter is specified, adjust the range to only fetch those rows
+
             if row_filter and len(row_filter) == 2:
                 start_row, end_row = row_filter
-                # We need to include the header row (row 1) plus the specified rows
                 range_name = f'{first_sheet_name}!A1:G{end_row}'
                 self.add_log('INFO', f'Using filtered range: {range_name}, will process rows {start_row}-{end_row}')
             else:
-                range_name = f'{first_sheet_name}!A1:G'  # Adjust column range based on your sheet structure
+                range_name = f'{first_sheet_name}!A1:G'
                 self.add_log('INFO', f'Using range: {range_name}')
-            
-            # Get sheet data
+
             rows = self.google_api.get_sheet_data(self.spreadsheet_id, range_name)
-            
             if not rows:
                 self.add_log('WARNING', 'No data found in the Google Sheet')
                 return
-                
-            # Extract headers (first row)
+
             headers = rows[0]
-            
-            # Process each row (skip header row)
+
             for row_idx, row in enumerate(rows[1:], start=2):
-                # If we have a row filter, skip rows that are not in the filter range
                 if row_filter and (row_idx < row_filter[0] or row_idx > row_filter[1]):
                     self.add_log('INFO', f'Skipping row {row_idx} (outside filter range {row_filter[0]}-{row_filter[1]})')
                     continue
-                    
+
                 try:
-                    # Create a dictionary mapping headers to row values
                     row_data = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
-                    
-                    # Log the headers and row data for debugging
+
                     self.add_log('DEBUG', f'Headers found: {headers}')
                     self.add_log('DEBUG', f'Row data: {row_data}')
-                    
-                    # Check if this article is already in our database - try various possible column names
+
                     title = None
                     for possible_title_key in ['Title', 'title', 'כותרת', 'כותרת מאמר', 'שם המאמר', 'נושא']:
                         if possible_title_key in row_data and row_data[possible_title_key]:
                             title = row_data[possible_title_key]
                             break
-                            
+
                     if not title:
                         self.add_log('WARNING', f'Row {row_idx}: Missing title, skipping')
                         continue
-                        
+
                     existing_article = Article.query.filter_by(title=title).first()
                     if existing_article:
                         self.add_log('INFO', f'Article "{title}" already exists in database, skipping')
                         continue
-                        
-                    # Get Google Doc content if available
+
                     content = ''
-                    
-                    # Try different possible column names for document link
                     doc_link = None
                     for possible_link_key in ['Document Link', 'google_doc_link', 'קישור למאמר', 'לינק למסמך']:
                         if possible_link_key in row_data and row_data[possible_link_key]:
                             doc_link = row_data[possible_link_key]
                             break
-                    
+
                     if doc_link and 'docs.google.com' in doc_link:
-                        # Extract document ID from the URL
                         doc_id_match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', doc_link)
                         if doc_id_match:
                             doc_id = doc_id_match.group(1)
@@ -129,20 +103,16 @@ class ArticleProcessor:
                             self.add_log('INFO', f'Retrieved content from Google Doc: {len(content)} characters')
                         else:
                             self.add_log('WARNING', f'Row {row_idx}: Invalid Google Doc link format')
-                    
-                    # Get scheduled date if available
+
                     scheduled_date = None
-                    
-                    # Try different possible column names for scheduled date
                     date_str = None
                     for possible_date_key in ['Scheduled Date', 'scheduled_date', 'תאריך פרסום', 'תאריך']:
                         if possible_date_key in row_data and row_data[possible_date_key]:
                             date_str = row_data[possible_date_key]
                             break
-                            
+
                     if date_str:
                         try:
-                            # Try different date formats (adjust based on your sheet format)
                             formats = ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y']
                             for fmt in formats:
                                 try:
@@ -152,22 +122,19 @@ class ArticleProcessor:
                                     continue
                         except Exception as e:
                             self.add_log('WARNING', f'Row {row_idx}: Error parsing date: {str(e)}')
-                    
-                    # Get category
+
                     category = None
                     for possible_category_key in ['Category', 'category', 'קטגוריה']:
                         if possible_category_key in row_data and row_data[possible_category_key]:
                             category = row_data[possible_category_key]
                             break
-                    
-                    # Get image link if available
+
                     image_link = None
                     for possible_image_key in ['Image Link', 'image_link', 'קישור לתמונה', 'תמונה']:
                         if possible_image_key in row_data and row_data[possible_image_key]:
                             image_link = row_data[possible_image_key]
                             break
-                    
-                    # Create new article in database
+
                     article = Article(
                         title=title,
                         category=category,
@@ -175,94 +142,69 @@ class ArticleProcessor:
                         scheduled_date=scheduled_date,
                         google_doc_link=doc_link,
                         image_link=image_link,
-                        content=content  # Save the retrieved content
+                        content=content
                     )
-                    
+
                     db.session.add(article)
                     db.session.commit()
-                    
-                    # Log success
                     self.add_log('INFO', f'Added new article: "{title}"')
-                    
+
                 except Exception as row_error:
                     self.add_log('ERROR', f'Error processing row {row_idx}: {str(row_error)}')
-                    
+
         except Exception as e:
             self.add_log('ERROR', f'Error processing Google Sheet: {str(e)}')
-            
+
     def process_images(self):
-        """Process images for articles in draft status"""
         try:
             articles = Article.query.filter_by(status='draft').all()
-            
+
             for article in articles:
                 if article.image_link and not article.featured_media_id:
                     try:
-                        # Download image
                         response = requests.get(article.image_link)
                         response.raise_for_status()
-                        
-                        # Determine filename from URL
+
                         filename = article.image_link.split('/')[-1]
                         if '?' in filename:
                             filename = filename.split('?')[0]
-                        
-                        # If no extension, default to jpg
                         if '.' not in filename:
                             filename += '.jpg'
-                            
-                        # Upload to WordPress
+
                         media_id = self.wp_api.upload_media(
                             BytesIO(response.content).read(),
                             filename
                         )
-                        
+
                         if media_id:
                             article.featured_media_id = media_id
                             db.session.commit()
                             self.add_log('INFO', f'Uploaded image for article: "{article.title}"')
                         else:
                             self.add_log('ERROR', f'Failed to upload image for article: "{article.title}"')
-                            
+
                     except Exception as img_error:
                         self.add_log('ERROR', f'Error processing image for "{article.title}": {str(img_error)}')
-        
+
         except Exception as e:
             self.add_log('ERROR', f'Error in image processing: {str(e)}')
 
     def run_processor(self, row_filter=None):
-        """
-        Run the full processing workflow
-        
-        Args:
-            row_filter (tuple, optional): A tuple of (start_row, end_row) to process only specific rows.
-        """
         self.add_log('INFO', 'Starting article processing workflow')
         if row_filter:
             self.add_log('INFO', f'Using row filter: rows {row_filter[0]}-{row_filter[1]}')
-        
         self.process_sheets(row_filter)
         self.process_images()
         self.add_log('INFO', 'Completed article processing workflow')
-        
-# Create functions to run the processor with different options
 def run_article_processor(row_filter=None):
-    """Run the full processor with optional row filtering"""
     with app.app_context():
         processor = ArticleProcessor()
         processor.run_processor(row_filter)
 
 def run_specific_rows(start_row, end_row):
-    """Run the processor on specific rows only"""
     with app.app_context():
         processor = ArticleProcessor()
         processor.run_processor((start_row, end_row))
-        
-def run_rows_26_and_27():
-    """Run the processor specifically on rows 26 and 27 as requested"""
-    with app.app_context():
-        processor = ArticleProcessor()
-        processor.run_processor((26, 27))
 
 if __name__ == "__main__":
     run_article_processor()
