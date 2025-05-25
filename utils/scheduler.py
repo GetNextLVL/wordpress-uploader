@@ -3,7 +3,7 @@ import time
 import threading
 import logging
 from datetime import datetime
-from app import db
+from app import app, db
 from models import Article
 
 class PublishScheduler:
@@ -25,11 +25,17 @@ class PublishScheduler:
             self.thread.join()
 
     def _run(self):
-        schedule.every(10).minutes.do(self._check_scheduled_posts)
-        
+        schedule.every(10).minutes.do(self._wrapped_check_scheduled_posts)
         while self.running:
             schedule.run_pending()
             time.sleep(60)
+
+    def _wrapped_check_scheduled_posts(self):
+        try:
+            with app.app_context():
+                self._check_scheduled_posts()
+        except Exception as e:
+            logging.error(f"Scheduler error (outer context): {str(e)}")
 
     def _check_scheduled_posts(self):
         try:
@@ -46,40 +52,29 @@ class PublishScheduler:
 
     def _publish_post(self, article):
         try:
-            # Prepare content - use stored content or try to fetch if missing
             content = article.content
             if not content and article.google_doc_link:
                 try:
-                    # This is a fallback if content wasn't stored during processing
                     from utils.google_api import GoogleAPI
                     google_api = GoogleAPI()
-                    
-                    # Extract document ID from the URL
                     import re
                     doc_id_match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', article.google_doc_link)
                     if doc_id_match:
                         doc_id = doc_id_match.group(1)
                         content = google_api.get_doc_content(doc_id)
-                        
-                        # Update the article with the content
                         article.content = content
                         db.session.commit()
                 except Exception as e:
                     logging.error(f"Failed to get content from Google Doc: {str(e)}")
-            
-            # Handle featured media if available
-            featured_media_id = None
-            if article.featured_media_id:
-                featured_media_id = article.featured_media_id
-                
-            # Create the post in WordPress
+
+            featured_media_id = article.featured_media_id if article.featured_media_id else None
+
             result = self.wordpress_api.create_post(
                 title=article.title,
                 content=content,
                 status='publish',
                 date=article.scheduled_date,
-                featured_media_id=featured_media_id,
-                category_id=None  # Could map to WordPress category if needed
+                featured_media_id=featured_media_id
             )
 
             if result:
