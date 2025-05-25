@@ -1,8 +1,10 @@
 Flask
 flask_sqlalchemy
+requests
 google-api-python-client
 google-auth
 google-auth-httplib2
 google-auth-oauthlib
-requests
 schedule
+python-dotenv
+gunicorn
