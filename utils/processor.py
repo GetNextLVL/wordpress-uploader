@@ -40,6 +40,8 @@ class ArticleProcessor:
         if not rows: return
 
         headers = rows[0]
+        col_map = {key.strip(): idx for idx, key in enumerate(headers)}
+
         for row_idx, row in enumerate(rows[1:], start=2):
             if row_filter and (row_idx < row_filter[0] or row_idx > row_filter[1]): continue
             try:
@@ -91,8 +93,15 @@ class ArticleProcessor:
                     continue
 
                 post_url = post_data.get('link')
-                self.google_api.update_cell(self.spreadsheet_id, sheet_name, f'C{row_idx}', 'מוכן')
-                self.google_api.update_cell(self.spreadsheet_id, sheet_name, f'H{row_idx}', post_url)
+
+                if 'סטטוס' in col_map:
+                    col_letter = chr(65 + col_map['סטטוס'])
+                    self.google_api.update_cell(self.spreadsheet_id, sheet_name, f'{col_letter}{row_idx}', 'מוכן')
+
+                if 'POST URL' in col_map:
+                    col_letter = chr(65 + col_map['POST URL'])
+                    self.google_api.update_cell(self.spreadsheet_id, sheet_name, f'{col_letter}{row_idx}', post_url)
+
                 log_to_file(datetime.now().isoformat(), f"Row {row_idx}", "Success", f"Published to {post_url}")
 
             except Exception as e:
