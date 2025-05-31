@@ -38,13 +38,15 @@ class ArticleProcessor:
         )
         self.spreadsheet_id = app.config['GOOGLE_SHEETS_ID']
         self.sheet_name = app.config.get('GOOGLE_SHEET_NAME') or 'Sheet1'
+        self.errors_found = False  # כדי לדעת אם הייתה שגיאה
 
     def run_processor(self, row_filter=None):
         sheet_metadata = self.google_api.sheets_service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
         sheet_name = sheet_metadata['sheets'][0]['properties']['title']
         range_name = f'{sheet_name}!A1:H'
         rows = self.google_api.get_sheet_data(self.spreadsheet_id, range_name)
-        if not rows: return
+        if not rows:
+            return
 
         headers = rows[0]
         col_map = {key.strip(): idx for idx, key in enumerate(headers)}
@@ -97,6 +99,7 @@ class ArticleProcessor:
                     date=scheduled_date
                 )
                 if not post_data:
+                    self.errors_found = True
                     log_to_file(datetime.now().isoformat(), f"Row {row_idx}", "Error", "Post creation failed")
                     continue
 
@@ -113,7 +116,14 @@ class ArticleProcessor:
                 log_to_file(datetime.now().isoformat(), f"Row {row_idx}", "Success", f"Published to {post_url}")
 
             except Exception as e:
+                self.errors_found = True
                 log_to_file(datetime.now().isoformat(), f"Row {row_idx}", "Exception", str(e))
+        if not self.errors_found:
+            try:
+                shutil.rmtree("logs", ignore_errors=True)
+                print("✅ logs directory deleted (no errors).")
+            except Exception as e:
+                print(f"⚠️ Failed to delete logs: {e}")
 
 def run_article_processor(row_filter=None):
     ArticleProcessor().run_processor(row_filter)
