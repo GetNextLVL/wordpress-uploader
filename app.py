@@ -1,20 +1,12 @@
 import os
 import logging
 from flask import Flask, render_template, jsonify, request
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
 
-class Base(DeclarativeBase):
-    pass
-
-db = SQLAlchemy(model_class=Base)
 app = Flask(__name__)
 
 # Config
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_change_this")
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///wordpress_uploader.db")
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["GOOGLE_SHEETS_ID"] = os.environ.get("GOOGLE_SHEETS_ID")
 app.config["GOOGLE_SHEET_NAME"] = os.environ.get("GOOGLE_SHEET_NAME")
 app.config["WP_API_URL"] = os.environ.get("WP_API_URL")
@@ -22,40 +14,52 @@ app.config["WP_API_USER"] = os.environ.get("WP_API_USER")
 app.config["WP_API_KEY"] = os.environ.get("WP_API_KEY")
 app.config["WP_SITE_URL"] = os.environ.get("WP_SITE_URL")
 
-db.init_app(app)
-
 @app.route('/')
 def dashboard():
     return render_template('dashboard.html')
 
 @app.route('/api/status')
 def api_status():
-    from models import Article, Log
-    today = datetime.utcnow().date()
-
-    pending_posts = Article.query.filter_by(status='draft').count()
-    published_today = Article.query.filter(
-        Article.status == 'published',
-        db.func.date(Article.updated_at) == today
-    ).count()
-    recent_errors = Log.query.filter_by(level='ERROR').count()
-
-    recent_activities = []
-    logs = Log.query.order_by(Log.timestamp.desc()).limit(10).all()
-    for log in logs:
-        recent_activities.append({
-            'timestamp': log.timestamp.isoformat(),
-            'action': 'Article Processing',
-            'status': 'error' if log.level == 'ERROR' else 'success',
-            'details': log.message
+    try:
+        with open("logs/runtime.log", "r", encoding="utf-8") as f:
+            lines = f.readlines()[-10:]
+        recent_activities = []
+        for line in lines:
+            parts = line.strip().split(" | ")
+            if len(parts) == 4:
+                recent_activities.append({
+                    'timestamp': parts[0],
+                    'action': parts[1],
+                    'status': parts[2],
+                    'details': parts[3]
+                })
+        return jsonify({
+            'pending_posts': 0,
+            'published_today': 0,
+            'error_count': sum(1 for log in recent_activities if log['status'].lower() == 'error'),
+            'recent_activity': recent_activities
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    return jsonify({
-        'pending_posts': pending_posts,
-        'published_today': published_today,
-        'error_count': recent_errors,
-        'recent_activity': recent_activities
-    })
+@app.route('/api/logs')
+def get_logs():
+    try:
+        with open("logs/runtime.log", "r", encoding="utf-8") as f:
+            lines = f.readlines()[-50:]
+        logs = []
+        for line in lines:
+            parts = line.strip().split(" | ")
+            if len(parts) == 4:
+                logs.append({
+                    "time": parts[0],
+                    "action": parts[1],
+                    "status": parts[2],
+                    "details": parts[3]
+                })
+        return jsonify(logs)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/process/rows', methods=['POST'])
 def process_rows():
@@ -66,14 +70,11 @@ def process_rows():
         logging.info(f"📥 /api/process/rows called with: start={start_row}, end={end_row}")
 
         if start_row is None or end_row is None:
-            logging.warning("⚠️ Missing row parameters")
             return jsonify({'success': False, 'error': 'Missing required parameters'}), 400
         if start_row > end_row:
-            logging.warning("⚠️ Invalid row range")
             return jsonify({'success': False, 'error': 'Invalid row range'}), 400
 
         run_specific_rows(start_row, end_row)
-        logging.info(f"✅ Successfully triggered processing for rows {start_row}–{end_row}")
         return jsonify({'success': True, 'message': f'Processing rows {start_row} to {end_row}'})
     except Exception as e:
         logging.error(f"❌ Error in process_rows: {str(e)}")
@@ -85,7 +86,6 @@ def process_specific_rows(start_row, end_row):
     try:
         logging.info(f"📥 /api/process/rows/{start_row}/{end_row} called")
         run_specific_rows(start_row, end_row)
-        logging.info(f"✅ Processing initiated for rows {start_row}–{end_row}")
         return jsonify({'success': True, 'message': f'Processing rows {start_row} to {end_row}'})
     except Exception as e:
         logging.error(f"❌ Error in process_specific_rows: {str(e)}")
@@ -93,16 +93,8 @@ def process_specific_rows(start_row, end_row):
 
 @app.errorhandler(404)
 def not_found_error(error):
-    logging.warning("⚠️ 404 Not Found")
     return render_template('base.html', error="Page not found"), 404
 
 @app.errorhandler(500)
 def internal_error(error):
-    logging.error(f"❌ 500 Internal Error: {str(error)}")
-    db.session.rollback()
     return render_template('base.html', error="Internal server error"), 500
-
-# Initialize DB
-with app.app_context():
-    import models
-    db.create_all()
