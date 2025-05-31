@@ -50,25 +50,6 @@ class GoogleAPI:
             logging.error(f"❌ Error fetching sheet data: {str(e)}")
             return []
 
-    def get_doc_content(self, doc_id):
-        logging.debug(f"📝 Fetching Google Doc content for doc ID: {doc_id}")
-        try:
-            document = self.docs_service.documents().get(documentId=doc_id).execute()
-            content = []
-            for element in document.get('body', {}).get('content', []):
-                if 'paragraph' in element:
-                    for para_element in element['paragraph'].get('elements', []):
-                        if 'textRun' in para_element:
-                            content.append(para_element['textRun']['content'])
-            logging.debug(f"✅ Google Doc fetched: {len(content)} lines")
-            return '\n'.join(content).strip()
-        except HttpError as http_err:
-            logging.error(f"❌ HTTP error fetching doc {doc_id}: {http_err}")
-            raise
-        except Exception as e:
-            logging.error(f"❌ Error fetching doc content ({doc_id}): {str(e)}")
-            raise
-
     def update_cell(self, spreadsheet_id, sheet_name, cell_ref, value):
         logging.debug(f"✏️ Updating cell {cell_ref} to: {value}")
         try:
@@ -81,3 +62,43 @@ class GoogleAPI:
             logging.info(f"✅ Updated cell {cell_ref} with value: {value}")
         except Exception as e:
             logging.error(f"❌ Error updating cell {cell_ref}: {str(e)}")
+
+    def get_doc_content(self, doc_id):
+        logging.debug(f"📝 Fetching Google Doc content for doc ID: {doc_id}")
+        try:
+            document = self.docs_service.documents().get(documentId=doc_id).execute()
+            content = []
+
+            def get_tag(style):
+                if style.get('heading') == 'HEADING_1':
+                    return 'h1'
+                if style.get('heading') == 'HEADING_2':
+                    return 'h2'
+                if style.get('heading') == 'HEADING_3':
+                    return 'h3'
+                return 'p'
+
+            for element in document.get('body', {}).get('content', []):
+                if 'paragraph' in element:
+                    para = element['paragraph']
+                    tag = get_tag(para.get('paragraphStyle', {}))
+                    line = ""
+                    for elem in para.get('elements', []):
+                        txt = elem.get('textRun', {}).get('content', '')
+                        bold = elem.get('textRun', {}).get('textStyle', {}).get('bold', False)
+                        italic = elem.get('textRun', {}).get('textStyle', {}).get('italic', False)
+                        if bold:
+                            txt = f"<strong>{txt}</strong>"
+                        if italic:
+                            txt = f"<em>{txt}</em>"
+                        line += txt
+                    content.append(f"<{tag}>{line.strip()}</{tag}>")
+            html = "\n".join(content).strip()
+            logging.debug(f"✅ Converted Google Doc to HTML ({len(content)} blocks)")
+            return html
+        except HttpError as http_err:
+            logging.error(f"❌ HTTP error fetching doc {doc_id}: {http_err}")
+            raise
+        except Exception as e:
+            logging.error(f"❌ Error fetching doc content ({doc_id}): {str(e)}")
+            raise
