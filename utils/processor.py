@@ -2,6 +2,8 @@ import logging
 import re
 import requests
 import random
+import shutil
+import os
 from datetime import datetime
 from io import BytesIO
 from app import app
@@ -23,6 +25,11 @@ def log_to_file(time, action, status, details):
 
 class ArticleProcessor:
     def __init__(self):
+        # מחיקת תיקיית logs אם קיימת ויצירתה מחדש
+        if os.path.exists("logs"):
+            shutil.rmtree("logs")
+        os.makedirs("logs", exist_ok=True)
+
         self.google_api = GoogleAPI()
         self.wp_api = WordPressAPI(
             app.config['WP_API_URL'],
@@ -43,7 +50,8 @@ class ArticleProcessor:
         col_map = {key.strip(): idx for idx, key in enumerate(headers)}
 
         for row_idx, row in enumerate(rows[1:], start=2):
-            if row_filter and (row_idx < row_filter[0] or row_idx > row_filter[1]): continue
+            if row_filter and (row_idx < row_filter[0] or row_idx > row_filter[1]):
+                continue
             try:
                 row_data = {headers[i]: row[i] if i < len(row) else '' for i in range(len(headers))}
                 title = next((row_data[k] for k in ['Title', 'כותרת מאמר', 'נושא'] if k in row_data and row_data[k]), None)
