@@ -12,8 +12,13 @@ class WordPressAPI:
             'Content-Type': 'application/json'
         }
 
-    def create_post(self, title, content, status='draft', category_id=None, featured_media_id=None, date=None):
+    def create_post(self, title, content, category_id=None, featured_media_id=None, date=None):
         endpoint = f"{self.api_url}/posts"
+
+        # Determine post status based on date
+        now = datetime.now(date.tzinfo) if date else datetime.now()
+        status = "future" if date and date > now else "publish"
+
         data = {
             'title': title,
             'content': content,
@@ -40,7 +45,7 @@ class WordPressAPI:
                 logging.error(f"Response content: {e.response.text}")
             return None
 
-    def upload_media(self, image_data, filename):
+    def upload_media(self, image_data, filename, title=None):
         if not image_data:
             logging.error("❌ No image data provided for upload.")
             return None
@@ -62,6 +67,19 @@ class WordPressAPI:
             media = response.json()
             media_id = media.get('id')
             logging.info(f"✅ Media uploaded successfully: ID {media_id} | Link: {media.get('source_url')}")
+
+            # Update metadata
+            if title:
+                meta_endpoint = f"{self.api_url}/media/{media_id}"
+                meta_data = {
+                    'alt_text': title,
+                    'description': title,
+                    'caption': "Credit Canva.com"
+                }
+                meta_response = requests.post(meta_endpoint, json=meta_data, headers=self.headers, timeout=10)
+                meta_response.raise_for_status()
+                logging.info("✅ Media metadata updated successfully")
+
             return media_id
         except requests.exceptions.RequestException as e:
             logging.error(f"❌ Error uploading media: {str(e)}")
