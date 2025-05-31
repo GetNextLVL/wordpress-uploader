@@ -21,8 +21,18 @@ def dashboard():
 @app.route('/api/status')
 def api_status():
     try:
-        with open("logs/runtime.log", "r", encoding="utf-8") as f:
+        log_path = "logs/runtime.log"
+        if not os.path.exists(log_path):
+            return jsonify({
+                'pending_posts': 0,
+                'published_today': 0,
+                'error_count': 0,
+                'recent_activity': []
+            })
+
+        with open(log_path, "r", encoding="utf-8") as f:
             lines = f.readlines()[-10:]
+
         recent_activities = []
         for line in lines:
             parts = line.strip().split(" | ")
@@ -33,6 +43,7 @@ def api_status():
                     'status': parts[2],
                     'details': parts[3]
                 })
+
         return jsonify({
             'pending_posts': 0,
             'published_today': 0,
