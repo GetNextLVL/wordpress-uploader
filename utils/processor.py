@@ -2,13 +2,15 @@ import logging
 import re
 import requests
 import random
-import shutil
 import os
 from datetime import datetime
 from io import BytesIO
 from app import app
 from utils.google_api import GoogleAPI
 from utils.wordpress_api import WordPressAPI
+
+LOG_PATH = "logs/runtime.log"
+MAX_LOG_LINES = 500
 
 def convert_drive_link_to_direct(link):
     file_id_match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', link)
@@ -19,17 +21,25 @@ def convert_drive_link_to_direct(link):
         return f'https://drive.google.com/uc?export=download&id={file_id}'
     return link
 
+def ensure_logs_dir():
+    os.makedirs("logs", exist_ok=True)
+
 def log_to_file(time, action, status, details):
-    with open("logs/runtime.log", "a", encoding="utf-8") as f:
-        f.write(f"{time} | {action} | {status} | {details}\n")
+    ensure_logs_dir()
+    if os.path.exists(LOG_PATH):
+        with open(LOG_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        lines.append(f"{time} | {action} | {status} | {details}\n")
+        lines = lines[-MAX_LOG_LINES:]
+        with open(LOG_PATH, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+    else:
+        with open(LOG_PATH, "w", encoding="utf-8") as f:
+            f.write(f"{time} | {action} | {status} | {details}\n")
 
 class ArticleProcessor:
     def __init__(self):
-        # מחיקת תיקיית logs אם קיימת ויצירתה מחדש
-        if os.path.exists("logs"):
-            shutil.rmtree("logs")
-        os.makedirs("logs", exist_ok=True)
-
+        ensure_logs_dir()
         self.google_api = GoogleAPI()
         self.wp_api = WordPressAPI(
             app.config['WP_API_URL'],
@@ -38,7 +48,10 @@ class ArticleProcessor:
         )
         self.spreadsheet_id = app.config['GOOGLE_SHEETS_ID']
         self.sheet_name = app.config.get('GOOGLE_SHEET_NAME') or 'Sheet1'
-        self.errors_found = False  # כדי לדעת אם הייתה שגיאה
+        self.errors_found = False
+
+    def remove_first_h1(self, html):
+        return re.sub(r'<h1[^>]*>.*?</h1>', '', html, count=1, flags=re.DOTALL)
 
     def run_processor(self, row_filter=None):
         sheet_metadata = self.google_api.sheets_service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
@@ -67,6 +80,7 @@ class ArticleProcessor:
                     match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', doc_link)
                     if match:
                         content = self.google_api.get_doc_content(match.group(1))
+                        content = self.remove_first_h1(content)
 
                 category = row_data.get('קטגוריה')
                 date_str = row_data.get('תאריך פרסום') or ''
@@ -118,12 +132,7 @@ class ArticleProcessor:
             except Exception as e:
                 self.errors_found = True
                 log_to_file(datetime.now().isoformat(), f"Row {row_idx}", "Exception", str(e))
-        if not self.errors_found:
-            try:
-                shutil.rmtree("logs", ignore_errors=True)
-                print("✅ logs directory deleted (no errors).")
-            except Exception as e:
-                print(f"⚠️ Failed to delete logs: {e}")
+
 
 def run_article_processor(row_filter=None):
     ArticleProcessor().run_processor(row_filter)
