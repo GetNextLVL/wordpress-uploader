@@ -2,23 +2,34 @@ import requests
 import logging
 from base64 import b64encode
 from datetime import datetime
+import re
+from urllib.parse import quote
 
 class WordPressAPI:
     def __init__(self, api_url, username, api_key):
         self.api_url = api_url.rstrip('/')
+        self.site_url = self.api_url.replace('/wp-json/wp/v2', '')
         self.auth = b64encode(f"{username}:{api_key}".encode()).decode('ascii')
         self.headers = {
             'Authorization': f'Basic {self.auth}',
             'Content-Type': 'application/json'
         }
 
+    def _generate_slug(self, title):
+        slug = title.strip().lower()
+        slug = re.sub(r'\s+', '-', slug)
+        slug = re.sub(r'[^\w\-א-ת]', '', slug)
+        return quote(slug)
+
     def create_post(self, title, content, category_id=None, featured_media_id=None, date=None):
         endpoint = f"{self.api_url}/posts"
         now = datetime.now(date.tzinfo) if date else datetime.now()
         status = "future" if date and date > now else "publish"
+        slug = self._generate_slug(title)
 
         data = {
             'title': title,
+            'slug': slug,
             'content': content,
             'status': status,
         }
@@ -34,20 +45,8 @@ class WordPressAPI:
             res = requests.post(endpoint, json=data, headers=self.headers, timeout=10)
             res.raise_for_status()
             post = res.json()
-            post_id = post.get('id')
-            link = post.get('link')
 
-            if status == "future":
-                try:
-                    post_res = requests.get(f"{self.api_url}/posts/{post_id}?_embed", headers=self.headers, timeout=10)
-                    post_res.raise_for_status()
-                    embedded_post = post_res.json()
-                    link = embedded_post.get('link', link)
-                except:
-                    pass
-
-            logging.info(f"✅ Post created: ID {post_id} | Link: {link}")
-            post['link'] = link
+            post['link'] = f"{self.site_url}/{slug}/"
             return post
         except requests.exceptions.RequestException as e:
             logging.error(f"❌ Error creating post: {str(e)}")
