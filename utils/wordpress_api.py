@@ -14,8 +14,6 @@ class WordPressAPI:
 
     def create_post(self, title, content, category_id=None, featured_media_id=None, date=None):
         endpoint = f"{self.api_url}/posts"
-
-        # Determine post status based on date
         now = datetime.now(date.tzinfo) if date else datetime.now()
         status = "future" if date and date > now else "publish"
 
@@ -24,7 +22,6 @@ class WordPressAPI:
             'content': content,
             'status': status,
         }
-
         if category_id:
             data['categories'] = [category_id]
         if featured_media_id:
@@ -34,23 +31,32 @@ class WordPressAPI:
 
         try:
             logging.debug(f"📤 Creating post: {title} | Status: {status}")
-            response = requests.post(endpoint, json=data, headers=self.headers, timeout=10)
-            response.raise_for_status()
-            post = response.json()
-            logging.info(f"✅ Post created successfully: ID {post.get('id')} | Link: {post.get('link')}")
+            res = requests.post(endpoint, json=data, headers=self.headers, timeout=10)
+            res.raise_for_status()
+            post = res.json()
+            post_id = post.get('id')
+            link = post.get('link')
+
+            if status == "future":
+                try:
+                    post_res = requests.get(f"{self.api_url}/posts/{post_id}?_embed", headers=self.headers, timeout=10)
+                    post_res.raise_for_status()
+                    embedded_post = post_res.json()
+                    link = embedded_post.get('link', link)
+                except:
+                    pass
+
+            logging.info(f"✅ Post created: ID {post_id} | Link: {link}")
+            post['link'] = link
             return post
         except requests.exceptions.RequestException as e:
-            logging.error(f"❌ Error creating WordPress post: {str(e)}")
+            logging.error(f"❌ Error creating post: {str(e)}")
             if hasattr(e, 'response') and e.response is not None:
                 logging.error(f"Response content: {e.response.text}")
             return None
 
     def upload_media(self, image_data, filename, title=None):
-        if not image_data:
-            logging.error("❌ No image data provided for upload.")
-            return None
-        if not filename:
-            logging.error("❌ No filename provided for upload.")
+        if not image_data or not filename:
             return None
 
         endpoint = f"{self.api_url}/media"
@@ -61,24 +67,20 @@ class WordPressAPI:
         }
 
         try:
-            logging.debug(f"🖼 Uploading media file: {filename}")
-            response = requests.post(endpoint, data=image_data, headers=headers, timeout=10)
-            response.raise_for_status()
-            media = response.json()
+            logging.debug(f"🖼 Uploading media: {filename}")
+            res = requests.post(endpoint, data=image_data, headers=headers, timeout=10)
+            res.raise_for_status()
+            media = res.json()
             media_id = media.get('id')
-            logging.info(f"✅ Media uploaded successfully: ID {media_id} | Link: {media.get('source_url')}")
 
-            # Update metadata
             if title:
-                meta_endpoint = f"{self.api_url}/media/{media_id}"
-                meta_data = {
+                meta = {
                     'alt_text': title,
                     'description': title,
                     'caption': "Credit Canva.com"
                 }
-                meta_response = requests.post(meta_endpoint, json=meta_data, headers=self.headers, timeout=10)
-                meta_response.raise_for_status()
-                logging.info("✅ Media metadata updated successfully")
+                meta_res = requests.post(f"{self.api_url}/media/{media_id}", json=meta, headers=self.headers, timeout=10)
+                meta_res.raise_for_status()
 
             return media_id
         except requests.exceptions.RequestException as e:
