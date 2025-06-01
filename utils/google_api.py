@@ -68,37 +68,64 @@ class GoogleAPI:
         try:
             document = self.docs_service.documents().get(documentId=doc_id).execute()
             content = []
+            h1_skipped = False
+            list_stack = []
 
             def get_tag(style):
                 if style.get('heading') == 'HEADING_1':
                     return 'h1'
-                if style.get('heading') == 'HEADING_2':
+                elif style.get('heading') == 'HEADING_2':
                     return 'h2'
-                if style.get('heading') == 'HEADING_3':
+                elif style.get('heading') == 'HEADING_3':
                     return 'h3'
                 return 'p'
-
-            h1_skipped = False
 
             for element in document.get('body', {}).get('content', []):
                 if 'paragraph' in element:
                     para = element['paragraph']
-                    tag = get_tag(para.get('paragraphStyle', {}))
+                    style = para.get('paragraphStyle', {})
+                    tag = get_tag(style)
+
                     if tag == 'h1' and not h1_skipped:
                         h1_skipped = True
                         continue
 
+                    if 'bullet' in para:
+                        list_tag = 'ul'  # default unordered
+                        if style.get('namedStyleType', '').startswith('NUMBERED'):
+                            list_tag = 'ol'
+                        if not list_stack or list_stack[-1] != list_tag:
+                            if list_stack:
+                                content.append(f"</{list_stack.pop()}>")
+                            content.append(f"<{list_tag}>")
+                            list_stack.append(list_tag)
+                        tag = 'li'
+                    else:
+                        if list_stack:
+                            content.append(f"</{list_stack.pop()}>")
+
                     line = ""
                     for elem in para.get('elements', []):
-                        txt = elem.get('textRun', {}).get('content', '')
-                        bold = elem.get('textRun', {}).get('textStyle', {}).get('bold', False)
-                        italic = elem.get('textRun', {}).get('textStyle', {}).get('italic', False)
-                        if bold:
-                            txt = f"<strong>{txt}</strong>"
-                        if italic:
-                            txt = f"<em>{txt}</em>"
-                        line += txt
+                        text_run = elem.get('textRun', {})
+                        text = text_run.get('content', '').replace('\n', '')
+                        style = text_run.get('textStyle', {})
+
+                        if style.get('bold'):
+                            text = f"<strong>{text}</strong>"
+                        if style.get('italic'):
+                            text = f"<em>{text}</em>"
+                        if style.get('underline'):
+                            text = f"<u>{text}</u>"
+                        if style.get('link'):
+                            url = style['link'].get('url', '#')
+                            text = f'<a href="{url}" target="_blank">{text}</a>'
+
+                        line += text
+
                     content.append(f"<{tag}>{line.strip()}</{tag}>")
+
+            while list_stack:
+                content.append(f"</{list_stack.pop()}>")
 
             html = "\n".join(content).strip()
             logging.debug(f"✅ Converted Google Doc to HTML ({len(content)} blocks)")
