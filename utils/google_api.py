@@ -22,8 +22,7 @@ class GoogleAPI:
         try:
             service_account_file = 'service_account_sheets.json'
             if os.path.exists(service_account_file):
-                self.creds = Credentials.from_service_account_file(
-                    service_account_file, scopes=SCOPES)
+                self.creds = Credentials.from_service_account_file(service_account_file, scopes=SCOPES)
                 logging.info("✅ Authenticated with Google successfully.")
             else:
                 logging.error(f"❌ Service account file not found: {service_account_file}")
@@ -81,47 +80,52 @@ class GoogleAPI:
                 return 'p'
 
             for element in document.get('body', {}).get('content', []):
-                if 'paragraph' in element:
-                    para = element['paragraph']
-                    style = para.get('paragraphStyle', {})
-                    tag = get_tag(style)
+                if 'paragraph' not in element:
+                    continue
 
-                    if tag == 'h1' and not h1_skipped:
-                        h1_skipped = True
-                        continue
+                para = element['paragraph']
+                style = para.get('paragraphStyle', {})
+                tag = get_tag(style)
 
-                    if 'bullet' in para:
-                        list_tag = 'ul'  # default unordered
-                        if style.get('namedStyleType', '').startswith('NUMBERED'):
-                            list_tag = 'ol'
-                        if not list_stack or list_stack[-1] != list_tag:
-                            if list_stack:
-                                content.append(f"</{list_stack.pop()}>")
-                            content.append(f"<{list_tag}>")
-                            list_stack.append(list_tag)
-                        tag = 'li'
-                    else:
+                if tag == 'h1' and not h1_skipped:
+                    h1_skipped = True
+                    continue
+
+                if 'bullet' in para:
+                    list_tag = 'ul'
+                    if style.get('namedStyleType', '').startswith('NUMBERED'):
+                        list_tag = 'ol'
+                    if not list_stack or list_stack[-1] != list_tag:
                         if list_stack:
                             content.append(f"</{list_stack.pop()}>")
+                        content.append(f"<{list_tag}>")
+                        list_stack.append(list_tag)
+                    tag = 'li'
+                else:
+                    while list_stack:
+                        content.append(f"</{list_stack.pop()}>")
 
-                    line = ""
-                    for elem in para.get('elements', []):
-                        text_run = elem.get('textRun', {})
-                        text = text_run.get('content', '').replace('\n', '')
-                        style = text_run.get('textStyle', {})
+                line = ""
+                for elem in para.get('elements', []):
+                    text_run = elem.get('textRun', {})
+                    text = text_run.get('content', '').replace('\n', '')
+                    style = text_run.get('textStyle', {})
 
-                        if style.get('bold'):
-                            text = f"<strong>{text}</strong>"
-                        if style.get('italic'):
-                            text = f"<em>{text}</em>"
-                        if style.get('underline'):
-                            text = f"<u>{text}</u>"
-                        if style.get('link'):
-                            url = style['link'].get('url', '#')
-                            text = f'<a href="{url}" target="_blank">{text}</a>'
+                    if not text.strip():
+                        continue
+                    if style.get('bold'):
+                        text = f"<strong>{text}</strong>"
+                    if style.get('italic'):
+                        text = f"<em>{text}</em>"
+                    if style.get('underline'):
+                        text = f"<u>{text}</u>"
+                    if style.get('link'):
+                        url = style['link'].get('url', '#')
+                        text = f'<a href="{url}" target="_blank">{text}</a>'
 
-                        line += text
+                    line += text
 
+                if line.strip():
                     content.append(f"<{tag}>{line.strip()}</{tag}>")
 
             while list_stack:
