@@ -78,10 +78,16 @@ class GoogleAPI:
                     return 'h3'
                 return 'p'
 
+            h1_skipped = False
+
             for element in document.get('body', {}).get('content', []):
                 if 'paragraph' in element:
                     para = element['paragraph']
                     tag = get_tag(para.get('paragraphStyle', {}))
+                    if tag == 'h1' and not h1_skipped:
+                        h1_skipped = True
+                        continue
+
                     line = ""
                     for elem in para.get('elements', []):
                         txt = elem.get('textRun', {}).get('content', '')
@@ -93,6 +99,7 @@ class GoogleAPI:
                             txt = f"<em>{txt}</em>"
                         line += txt
                     content.append(f"<{tag}>{line.strip()}</{tag}>")
+
             html = "\n".join(content).strip()
             logging.debug(f"✅ Converted Google Doc to HTML ({len(content)} blocks)")
             return html
