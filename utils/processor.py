@@ -37,10 +37,14 @@ class ArticleProcessor:
         self.errors = False
 
     def run_processor(self, row_filter=None):
-        meta = self.google.sheets_service.spreadsheets().get(spreadsheetId=self.sheet).execute()
+        try:
+            meta = self.google.sheets_service.spreadsheets().get(spreadsheetId=self.sheet).execute()
+        except Exception as e:
+            log_to_file(datetime.now().isoformat(), "System", "Exception", f"Sheet metadata fetch failed: {str(e)}")
+            return
+
         rows = self.google.get_sheet_data(self.sheet, f"{meta['sheets'][0]['properties']['title']}!A1:H")
         if not rows: return
-
         headers = rows[0]
         col_map = {k.strip(): i for i, k in enumerate(headers)}
 
@@ -54,8 +58,17 @@ class ArticleProcessor:
                     continue
 
                 doc = next((data[k] for k in ['קישור למאמר', 'Document Link'] if data.get(k)), '')
-                match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', doc)
-                content = self.google.get_doc_content(match.group(1)) if match else ''
+                content = ''
+                try:
+                    match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', doc)
+                    if match:
+                        content = self.google.get_doc_content(match.group(1))
+                    else:
+                        log_to_file(datetime.now().isoformat(), f"Row {i}", "Error", "Invalid Doc URL")
+                        continue
+                except Exception as e:
+                    log_to_file(datetime.now().isoformat(), f"Row {i}", "Error", f"Doc fetch failed: {str(e)}")
+                    continue
 
                 date_str = data.get('תאריך פרסום') or ''
                 for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y']:
@@ -69,26 +82,32 @@ class ArticleProcessor:
                 name = data.get('שם תמונה') or 'default.jpg'
                 media_id = None
                 if img:
-                    r = requests.get(convert_drive_link_to_direct(img), timeout=10)
-                    if r.status_code == 200:
-                        media_id = self.wp.upload_media(BytesIO(r.content).read(), name, title=title)
+                    try:
+                        r = requests.get(convert_drive_link_to_direct(img), timeout=10)
+                        if r.status_code == 200:
+                            media_id = self.wp.upload_media(BytesIO(r.content).read(), name, title=title)
+                        else:
+                            log_to_file(datetime.now().isoformat(), f"Row {i}", "Error", "Image download failed")
+                    except Exception as e:
+                        log_to_file(datetime.now().isoformat(), f"Row {i}", "Error", f"Image fetch error: {str(e)}")
 
                 post = self.wp.create_post(title=title, content=content, category_id=None, featured_media_id=media_id, date=date)
                 if not post:
-                    self.errors = True
                     log_to_file(datetime.now().isoformat(), f"Row {i}", "Error", "Post creation failed")
                     continue
 
                 url = post.get('link')
-                if 'סטטוס' in col_map:
-                    self.google.update_cell(self.sheet, self.tab, f"{chr(65+col_map['סטטוס'])}{i}", 'מוכן')
-                if 'POST URL' in col_map:
-                    self.google.update_cell(self.sheet, self.tab, f"{chr(65+col_map['POST URL'])}{i}", url)
+                try:
+                    if 'סטטוס' in col_map:
+                        self.google.update_cell(self.sheet, self.tab, f"{chr(65+col_map['סטטוס'])}{i}", 'מוכן')
+                    if 'POST URL' in col_map:
+                        self.google.update_cell(self.sheet, self.tab, f"{chr(65+col_map['POST URL'])}{i}", url)
+                except Exception as e:
+                    log_to_file(datetime.now().isoformat(), f"Row {i}", "Error", f"Sheet update failed: {str(e)}")
 
                 log_to_file(datetime.now().isoformat(), f"Row {i}", "Success", f"Published to {url}")
 
             except Exception as e:
-                self.errors = True
                 log_to_file(datetime.now().isoformat(), f"Row {i}", "Exception", str(e))
 
 def run_article_processor(row_filter=None): ArticleProcessor().run_processor(row_filter)
